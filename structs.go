@@ -1,7 +1,5 @@
 package tokipay
 
-import "time"
-
 // Standard TokiPay API Response Structure
 type TokiPayResponse[T any] struct {
 	Code      int       `json:"code"`
@@ -140,4 +138,4 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 	Code    int    `json:"code"`
-} 
+}

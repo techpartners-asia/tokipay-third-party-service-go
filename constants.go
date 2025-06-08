@@ -15,8 +15,8 @@ const (
 	ThirdPartyAPIKey = "third_party_pay"
 
 	// Payment Types
-	TypeSPOS            = "SPOS"
-	TypeThirdPartyPay   = "THIRD_PARTY_PAY"
+	TypeSPOS          = "SPOS"
+	TypeThirdPartyPay = "THIRD_PARTY_PAY"
 
 	// Payment Status
 	StatusPending   = "PENDING"
@@ -34,4 +34,4 @@ const (
 
 	// Token expiry (2 weeks)
 	TokenExpiryDuration = 2 * 7 * 24 * 60 * 60 // seconds
-) 
+)

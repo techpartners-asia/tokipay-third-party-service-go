@@ -15,30 +15,29 @@ type APIError struct {
 
 // Token Request/Response
 type TokenRequest struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	MerchantID  string `json:"merchant_id"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	MerchantID string `json:"merchant_id"`
 }
 
 type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
+	AccessToken string `json:"accessToken"`
+	ExpiresIn   int    `json:"expires_in,omitempty"`
 }
 
 // QR Payment Request/Response
 type QRPaymentRequest struct {
-	SuccessURL string  `json:"success_url"`
-	FailureURL string  `json:"failure_url"`
-	OrderID    string  `json:"order_id"`
-	Amount     float64 `json:"amount"`
-	Notes      string  `json:"notes"`
+	SuccessURL string  `json:"successUrl" binding:"required"`
+	FailureURL string  `json:"failureUrl" binding:"required"`
+	OrderID    string  `json:"orderId" binding:"required"`
+	Amount     float64 `json:"amount" binding:"required"`
+	Notes      string  `json:"notes,omitempty"`
+	MerchantID string  `json:"merchantId" binding:"required"`
 }
 
 type QRPaymentResponse struct {
-	RequestID     string `json:"request_id"`
-	TransactionID string `json:"transaction_id"`
-	QRCode        string `json:"qr_code"`
-	QRImage       string `json:"qr_image"`
+	RequestID     string `json:"requestId"`
+	TransactionID string `json:"transactionId"`
 }
 
 // Mobile Payment Request/Response
@@ -108,18 +107,18 @@ type RefundResponse struct {
 
 // VAT Registration Request/Response
 type VATRegistrationRequest struct {
-	OrganizationName string `json:"organization_name"`
-	VATNumber        string `json:"vat_number"`
-	Address          string `json:"address"`
-	PhoneNumber      string `json:"phone_number"`
-	Email            string `json:"email"`
+	TransactionID string `json:"transactionId" binding:"required"`
+	DDTD          string `json:"DDTD" binding:"required"`
+	TotalAmount   string `json:"totalAmount,omitempty"`
+	VATAmount     string `json:"vatAmount,omitempty"`
+	CreatedDate   string `json:"createdDate,omitempty"`
+	MerchantName  string `json:"merchantName,omitempty"`
+	MerchantTIN   string `json:"merchantTin,omitempty"`
 }
 
 type VATRegistrationResponse struct {
-	Status            string `json:"status"`
-	OrganizationName  string `json:"organization_name"`
-	VATNumber         string `json:"vat_number"`
-	RegistrationDate  string `json:"registration_date"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 // Callback Request from TokiPay
@@ -165,4 +164,4 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 	Code    int    `json:"code"`
-} 
+}

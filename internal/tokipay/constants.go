@@ -3,11 +3,11 @@ package tokipay
 // API Endpoints
 const (
 	// Base URLs
-	ProductionBaseURL = "https://api.toki.mn"
-	TestBaseURL      = "https://qams-api.toki.mn"
+	ProductionBaseURL = "https://ms-api.toki.mn"
+	TestBaseURL       = "https://qams-api.toki.mn"
 
 	// API Key
-	ThirdPartyAPIKey = "third-party-api-key"
+	ThirdPartyAPIKey = "third_party_pay"
 
 	// Payment Statuses
 	PaymentStatusPending   = "PENDING"
@@ -19,4 +19,4 @@ const (
 	// VAT Types
 	VATTypeIndividual = "INDIVIDUAL"
 	VATTypeCompany    = "COMPANY"
-) 
+)

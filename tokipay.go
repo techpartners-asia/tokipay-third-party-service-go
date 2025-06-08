@@ -12,31 +12,31 @@ import (
 
 // TokiPayClient represents the TokiPay third-party service client
 type TokiPayClient struct {
-	BaseURL      string
-	Username     string
-	Password     string
-	MerchantID   string
-	APIKey       string
-	AccessToken  string
-	TokenExpiry  time.Time
-	HTTPClient   *http.Client
+	BaseURL     string
+	Username    string
+	Password    string
+	MerchantID  string
+	APIKey      string
+	AccessToken string
+	TokenExpiry time.Time
+	HTTPClient  *http.Client
 }
 
 // TokiPay interface defines all available methods
 type TokiPay interface {
 	// Authentication
 	GetAccessToken() error
-	
+
 	// Payment Methods
 	CreateQRPayment(req QRPaymentRequest) (*QRPaymentResponse, error)
 	CreateMobilePayment(req MobilePaymentRequest) (*MobilePaymentResponse, error)
 	CreateDeeplinkPayment(req DeeplinkPaymentRequest) (*DeeplinkPaymentResponse, error)
-	
+
 	// Payment Management
 	CheckPaymentStatus(requestID string) (*PaymentStatusResponse, error)
 	CancelPayment(requestID string) error
 	RefundPayment(req RefundRequest) (*RefundResponse, error)
-	
+
 	// VAT Management
 	RegisterVAT(req VATRegistrationRequest) (*VATRegistrationResponse, error)
 }
@@ -64,7 +64,7 @@ func (c *TokiPayClient) GetAccessToken() error {
 
 	// Create basic auth header
 	auth := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
-	
+
 	req, err := http.NewRequest("GET", c.BaseURL+TokenEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -173,7 +173,7 @@ func (c *TokiPayClient) CheckPaymentStatus(requestID string) (*PaymentStatusResp
 	}
 
 	endpoint := fmt.Sprintf("%s?requestId=%s", StatusEndpoint, requestID)
-	
+
 	var resp TokiPayResponse[PaymentStatusResponse]
 	if err := c.makeRequest("GET", endpoint, nil, &resp); err != nil {
 		return nil, err
@@ -193,7 +193,7 @@ func (c *TokiPayClient) CancelPayment(requestID string) error {
 	}
 
 	endpoint := fmt.Sprintf("%s/%s", CancelEndpoint, requestID)
-	
+
 	var resp TokiPayResponse[interface{}]
 	if err := c.makeRequest("PATCH", endpoint, nil, &resp); err != nil {
 		return err
@@ -281,4 +281,4 @@ func (c *TokiPayClient) makeRequest(method, endpoint string, body interface{}, r
 	}
 
 	return nil
-} 
+}

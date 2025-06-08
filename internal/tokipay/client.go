@@ -2,23 +2,23 @@ package tokipay
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 )
 
 // Client represents a TokiPay API client
 type Client struct {
-	BaseURL      string
-	Username     string
-	Password     string
-	MerchantID   string
-	APIKey       string
-	AccessToken  string
-	TokenExpiry  time.Time
-	HTTPClient   *http.Client
+	BaseURL     string
+	Username    string
+	Password    string
+	MerchantID  string
+	APIKey      string
+	AccessToken string
+	TokenExpiry time.Time
+	HTTPClient  *http.Client
 }
 
 // New creates a new TokiPay client
@@ -42,25 +42,17 @@ func (c *Client) GetAccessToken() error {
 		return nil
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/access-token", c.BaseURL)
-	reqBody := TokenRequest{
-		Username:   c.Username,
-		Password:   c.Password,
-		MerchantID: c.MerchantID,
-	}
+	// Use Basic Authentication as per documentation
+	auth := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
+	url := fmt.Sprintf("%s/third-party-service/v1/auth/token", c.BaseURL)
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("error marshaling request body: %v", err)
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("error creating request: %v", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", c.APIKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Basic "+auth)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -76,13 +68,18 @@ func (c *Client) GetAccessToken() error {
 		return fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var tokenResp TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	var apiResponse Response[TokenResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
 		return fmt.Errorf("error decoding response: %v", err)
 	}
 
-	c.AccessToken = tokenResp.AccessToken
-	c.TokenExpiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+	c.AccessToken = apiResponse.Data.AccessToken
+	// Default to 2 weeks if ExpiresIn is not provided
+	expiresIn := apiResponse.Data.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 2 * 7 * 24 * 60 * 60 // 2 weeks in seconds
+	}
+	c.TokenExpiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
 	return nil
 }
 
@@ -92,7 +89,10 @@ func (c *Client) CreateQRPayment(req QRPaymentRequest) (*QRPaymentResponse, erro
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/qr-payment", c.BaseURL)
+	// Set merchant ID
+	req.MerchantID = c.MerchantID
+
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/merchant-qr", c.BaseURL)
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request body: %v", err)
@@ -105,7 +105,7 @@ func (c *Client) CreateQRPayment(req QRPaymentRequest) (*QRPaymentResponse, erro
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	httpReq.Header.Set("X-API-Key", c.APIKey)
+	httpReq.Header.Set("api-key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -121,12 +121,111 @@ func (c *Client) CreateQRPayment(req QRPaymentRequest) (*QRPaymentResponse, erro
 		return nil, fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var qrResp QRPaymentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&qrResp); err != nil {
+	var apiResponse Response[QRPaymentResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
-	return &qrResp, nil
+	return &apiResponse.Data, nil
+}
+
+// CreateMobilePayment creates a mobile payment request
+func (c *Client) CreateMobilePayment(req MobilePaymentRequest) (*MobilePaymentResponse, error) {
+	if err := c.GetAccessToken(); err != nil {
+		return nil, err
+	}
+
+	// Set merchant ID and defaults
+	req.MerchantID = c.MerchantID
+	if req.CountryCode == "" {
+		req.CountryCode = "+976"
+	}
+	if req.Type == "" {
+		req.Type = "THIRD_PARTY_PAY"
+	}
+
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/phone-number", c.BaseURL)
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request body: %v", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	httpReq.Header.Set("api-key", c.APIKey)
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return nil, fmt.Errorf("error decoding error response: %v", err)
+		}
+		return nil, fmt.Errorf("API error: %s", errResp.Message)
+	}
+
+	var apiResponse Response[MobilePaymentResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+
+	return &apiResponse.Data, nil
+}
+
+// CreateDeeplinkPayment creates a deeplink payment request
+func (c *Client) CreateDeeplinkPayment(req DeeplinkPaymentRequest) (*DeeplinkPaymentResponse, error) {
+	if err := c.GetAccessToken(); err != nil {
+		return nil, err
+	}
+
+	// Set merchant ID and type
+	req.MerchantID = c.MerchantID
+	req.Type = "THIRD_PARTY_PAY"
+
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/deeplink", c.BaseURL)
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request body: %v", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	httpReq.Header.Set("api-key", c.APIKey)
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return nil, fmt.Errorf("error decoding error response: %v", err)
+		}
+		return nil, fmt.Errorf("API error: %s", errResp.Message)
+	}
+
+	var apiResponse Response[DeeplinkPaymentResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
+		return nil, fmt.Errorf("error decoding response: %v", err)
+	}
+
+	return &apiResponse.Data, nil
 }
 
 // CheckPaymentStatus checks the status of a payment
@@ -135,14 +234,15 @@ func (c *Client) CheckPaymentStatus(requestID string) (*PaymentStatusResponse, e
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/check-payment/%s", c.BaseURL, requestID)
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/status?requestId=%s", c.BaseURL, requestID)
 	httpReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 
+	httpReq.Header.Set("Accept", "*/*")
 	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	httpReq.Header.Set("X-API-Key", c.APIKey)
+	httpReq.Header.Set("api-key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -158,64 +258,56 @@ func (c *Client) CheckPaymentStatus(requestID string) (*PaymentStatusResponse, e
 		return nil, fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var statusResp PaymentStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+	var apiResponse Response[PaymentStatusResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
-	return &statusResp, nil
+	return &apiResponse.Data, nil
 }
 
-// CancelInvoice cancels an invoice
-func (c *Client) CancelInvoice(requestID string, req CancelInvoiceRequest) (*CancelInvoiceResponse, error) {
+// CancelPayment cancels a payment request
+func (c *Client) CancelPayment(requestID string) error {
 	if err := c.GetAccessToken(); err != nil {
-		return nil, err
+		return err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/cancel-invoice/%s", c.BaseURL, requestID)
-	jsonBody, err := json.Marshal(req)
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/%s", c.BaseURL, requestID)
+	httpReq, err := http.NewRequest("PATCH", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error marshaling request body: %v", err)
+		return fmt.Errorf("error creating request: %v", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %v", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	httpReq.Header.Set("X-API-Key", c.APIKey)
+	httpReq.Header.Set("api-key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
+		return fmt.Errorf("error making request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
-			return nil, fmt.Errorf("error decoding error response: %v", err)
+			return fmt.Errorf("error decoding error response: %v", err)
 		}
-		return nil, fmt.Errorf("API error: %s", errResp.Message)
+		return fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var cancelResp CancelInvoiceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cancelResp); err != nil {
-		return nil, fmt.Errorf("error decoding response: %v", err)
-	}
-
-	return &cancelResp, nil
+	return nil
 }
 
 // RefundPayment refunds a payment
-func (c *Client) RefundPayment(requestID string, req RefundPaymentRequest) (*RefundPaymentResponse, error) {
+func (c *Client) RefundPayment(req RefundRequest) (*RefundResponse, error) {
 	if err := c.GetAccessToken(); err != nil {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/refund-payment/%s", c.BaseURL, requestID)
+	// Set merchant ID
+	req.MerchantID = c.MerchantID
+
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/refund", c.BaseURL)
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request body: %v", err)
@@ -228,7 +320,6 @@ func (c *Client) RefundPayment(requestID string, req RefundPaymentRequest) (*Ref
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	httpReq.Header.Set("X-API-Key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -244,12 +335,12 @@ func (c *Client) RefundPayment(requestID string, req RefundPaymentRequest) (*Ref
 		return nil, fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var refundResp RefundPaymentResponse
-	if err := json.NewDecoder(resp.Body).Decode(&refundResp); err != nil {
+	var apiResponse Response[RefundResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
-	return &refundResp, nil
+	return &apiResponse.Data, nil
 }
 
 // RegisterVAT registers VAT details for an organization
@@ -258,7 +349,7 @@ func (c *Client) RegisterVAT(req VATRegistrationRequest) (*VATRegistrationRespon
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/third-party/register-vat", c.BaseURL)
+	url := fmt.Sprintf("%s/third-party-service/v1/payment-request/vat", c.BaseURL)
 	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request body: %v", err)
@@ -271,7 +362,7 @@ func (c *Client) RegisterVAT(req VATRegistrationRequest) (*VATRegistrationRespon
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	httpReq.Header.Set("X-API-Key", c.APIKey)
+	httpReq.Header.Set("api-key", c.APIKey)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
@@ -287,10 +378,10 @@ func (c *Client) RegisterVAT(req VATRegistrationRequest) (*VATRegistrationRespon
 		return nil, fmt.Errorf("API error: %s", errResp.Message)
 	}
 
-	var vatResp VATRegistrationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&vatResp); err != nil {
+	var apiResponse Response[VATRegistrationResponse]
+	if err := json.NewDecoder(resp.Body).Decode(&apiResponse); err != nil {
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
-	return &vatResp, nil
-} 
+	return &apiResponse.Data, nil
+}
