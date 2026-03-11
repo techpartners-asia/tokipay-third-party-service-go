@@ -1,13 +1,10 @@
 package tokipay
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
+
+	"resty.dev/v3"
 )
 
 // TokiPayClient represents the TokiPay third-party service client
@@ -19,13 +16,14 @@ type TokiPayClient struct {
 	APIKey      string
 	AccessToken string
 	TokenExpiry time.Time
-	HTTPClient  *http.Client
+	resty       *resty.Client
 }
 
 // TokiPay interface defines all available methods
 type TokiPay interface {
 	// Authentication
 	GetAccessToken() error
+	Close() error
 
 	// Payment Methods
 	CreateQRPayment(req QRPaymentRequest) (*QRPaymentResponse, error)
@@ -41,62 +39,54 @@ type TokiPay interface {
 	RegisterVAT(req VATRegistrationRequest) (*VATRegistrationResponse, error)
 }
 
-// New creates a new TokiPay client instance
+// New creates a new TokiPay client instance. Call Close() when done to release resources.
 func New(baseURL, username, password, merchantID string) TokiPay {
+	client := resty.New().
+		SetBaseURL(baseURL).
+		SetTimeout(30 * time.Second)
 	return &TokiPayClient{
 		BaseURL:    baseURL,
 		Username:   username,
 		Password:   password,
 		MerchantID: merchantID,
 		APIKey:     ThirdPartyAPIKey,
-		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		resty:      client,
 	}
 }
 
 // GetAccessToken retrieves and stores the access token
 func (c *TokiPayClient) GetAccessToken() error {
-	// Check if token is still valid
 	if c.AccessToken != "" && time.Now().Before(c.TokenExpiry) {
 		return nil
 	}
 
-	// Create basic auth header
-	auth := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
-
-	req, err := http.NewRequest("GET", c.BaseURL+TokenEndpoint, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Basic "+auth)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
 	var tokenResp TokiPayResponse[TokenResponse]
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %w", err)
+	resp, err := c.resty.R().
+		SetBasicAuth(c.Username, c.Password).
+		SetResult(&tokenResp).
+		Get(TokenEndpoint)
+	if err != nil {
+		body := ""
+		if resp != nil {
+			body = truncate(resp.String(), 500)
+		}
+		return fmt.Errorf("failed to execute request: %w\nresponse: %s", err, body)
 	}
-
+	if resp.IsError() {
+		return fmt.Errorf("token request failed with status %d: %s", resp.StatusCode(), resp.String())
+	}
 	if tokenResp.Code != 200 {
 		return fmt.Errorf("token request failed: %s", tokenResp.Error.Message)
 	}
 
 	c.AccessToken = tokenResp.Data.AccessToken
 	c.TokenExpiry = time.Now().Add(time.Duration(TokenExpiryDuration) * time.Second)
-
 	return nil
+}
+
+// Close releases resources held by the client. Call when done using the client.
+func (c *TokiPayClient) Close() error {
+	return c.resty.Close()
 }
 
 // CreateQRPayment creates a QR payment request
@@ -246,39 +236,31 @@ func (c *TokiPayClient) RegisterVAT(req VATRegistrationRequest) (*VATRegistratio
 
 // makeRequest is a helper method to make HTTP requests
 func (c *TokiPayClient) makeRequest(method, endpoint string, body interface{}, result interface{}) error {
-	var reqBody io.Reader
-
+	req := c.resty.R().
+		SetHeader("api-key", c.APIKey).
+		SetAuthToken(c.AccessToken).
+		SetResult(result)
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("failed to marshal request body: %w", err)
+		req.SetBody(body)
+	}
+
+	resp, err := req.Execute(method, endpoint)
+	if err != nil {
+		body := ""
+		if resp != nil {
+			body = truncate(resp.String(), 500)
 		}
-		reqBody = bytes.NewBuffer(jsonBody)
+		return fmt.Errorf("failed to execute request: %w\nresponse: %s", err, body)
 	}
-
-	req, err := http.NewRequest(method, c.BaseURL+endpoint, reqBody)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+	if resp.IsError() {
+		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode(), truncate(resp.String(), 500))
 	}
-
-	req.Header.Set("api-key", c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to execute request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if err := json.Unmarshal(respBody, result); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
 	return nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }
