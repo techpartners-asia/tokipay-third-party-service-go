@@ -76,7 +76,7 @@ func (c *TokiPayClient) GetAccessToken() error {
 		return fmt.Errorf("token request failed with status %d: %s", resp.StatusCode(), resp.String())
 	}
 	if tokenResp.Code != 200 {
-		return fmt.Errorf("token request failed: %s", tokenResp.Error.Message)
+		return fmt.Errorf("token request failed: %s", errorMessage(tokenResp.Error))
 	}
 
 	c.AccessToken = tokenResp.Data.AccessToken
@@ -103,7 +103,7 @@ func (c *TokiPayClient) CreateQRPayment(req QRPaymentRequest) (*QRPaymentRespons
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("QR payment request failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("QR payment request failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -129,7 +129,7 @@ func (c *TokiPayClient) CreateMobilePayment(req MobilePaymentRequest) (*MobilePa
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("mobile payment request failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("mobile payment request failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -150,7 +150,7 @@ func (c *TokiPayClient) CreateDeeplinkPayment(req DeeplinkPaymentRequest) (*Deep
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("deeplink payment request failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("deeplink payment request failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -170,7 +170,7 @@ func (c *TokiPayClient) CheckPaymentStatus(requestID string) (*PaymentStatusResp
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("payment status check failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("payment status check failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -190,7 +190,7 @@ func (c *TokiPayClient) CancelPayment(requestID string) error {
 	}
 
 	if resp.Code != 200 {
-		return fmt.Errorf("payment cancellation failed: %s", resp.Error.Message)
+		return fmt.Errorf("payment cancellation failed: %s", errorMessage(resp.Error))
 	}
 
 	return nil
@@ -210,7 +210,7 @@ func (c *TokiPayClient) RefundPayment(req RefundRequest) (*RefundResponse, error
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("refund request failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("refund request failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -228,7 +228,7 @@ func (c *TokiPayClient) RegisterVAT(req VATRegistrationRequest) (*VATRegistratio
 	}
 
 	if resp.Code != 200 {
-		return nil, fmt.Errorf("VAT registration failed: %s", resp.Error.Message)
+		return nil, fmt.Errorf("VAT registration failed: %s", errorMessage(resp.Error))
 	}
 
 	return &resp.Data, nil
@@ -263,4 +263,12 @@ func truncate(s string, maxLen int) string {
 		return s[:maxLen] + "..."
 	}
 	return s
+}
+
+// errorMessage safely returns the API error message, avoiding nil pointer panic
+func errorMessage(err *APIError) string {
+	if err != nil {
+		return err.Message
+	}
+	return "unknown error"
 }
